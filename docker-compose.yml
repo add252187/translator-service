@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  translator-service:
+    build: .
+    container_name: translator-service
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://translator:password@postgres:5432/translator_db
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data  # For SQLite or local storage
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - translator-network
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: translator-postgres
+    environment:
+      - POSTGRES_USER=translator
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=translator_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - translator-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: translator-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - translator-network
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: translator-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - translator-service
+    networks:
+      - translator-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  translator-network:
+    driver: bridge

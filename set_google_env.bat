@@ -1,0 +1,1 @@
+set GOOGLE_APPLICATION_CREDENTIALS=%~dp0traductorbidireccional-a4b169f37aef.json

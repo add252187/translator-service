@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Traductor en Vivo</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #1a1a2e;
+            min-height: 100vh;
+            padding: 20px;
+            color: white;
+        }
+        .container { max-width: 800px; margin: 0 auto; }
+        h1 { text-align: center; margin-bottom: 20px; color: #00d9ff; }
+        .panel {
+            background: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 15px;
+        }
+        .panel h2 { margin-bottom: 15px; color: #00d9ff; font-size: 1.1em; }
+        .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        button {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        button:hover { transform: translateY(-2px); }
+        button:disabled { opacity: 0.5; }
+        button.active { background: linear-gradient(135deg, #00b894, #00cec9); }
+        button.hangup { background: #e74c3c; }
+        button.recording { background: #e74c3c; animation: pulse 1s infinite; }
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.7); }
+            50% { box-shadow: 0 0 0 10px rgba(231, 76, 60, 0); }
+        }
+        .toggle-box {
+            display: flex; align-items: center; gap: 10px;
+            background: rgba(0,0,0,0.3); padding: 10px 15px; border-radius: 25px;
+        }
+        .toggle {
+            width: 50px; height: 26px; background: #555; border-radius: 13px;
+            cursor: pointer; position: relative; transition: 0.3s;
+        }
+        .toggle.on { background: #00b894; }
+        .toggle::after {
+            content: ''; position: absolute; width: 22px; height: 22px;
+            background: white; border-radius: 50%; top: 2px; left: 2px; transition: 0.3s;
+        }
+        .toggle.on::after { left: 26px; }
+        .status { display: flex; gap: 15px; flex-wrap: wrap; }
+        .status-item {
+            background: rgba(0,0,0,0.3); padding: 8px 12px; border-radius: 8px;
+            font-size: 13px; border-left: 3px solid #666;
+        }
+        .status-item.on { border-color: #00b894; }
+        .status-item.off { border-color: #e74c3c; }
+        .logs {
+            background: #0d1117; border-radius: 10px; padding: 15px;
+            height: 250px; overflow-y: auto; font-family: monospace; font-size: 12px;
+        }
+        .log { padding: 4px 8px; margin: 2px 0; border-radius: 4px; background: rgba(255,255,255,0.05); }
+        .log.client { border-left: 3px solid #00b894; }
+        .log.agent { border-left: 3px solid #3498db; }
+        .log.trans { border-left: 3px solid #9b59b6; }
+        .log.system { border-left: 3px solid #f39c12; }
+        .visualizer {
+            height: 50px; background: rgba(0,0,0,0.3); border-radius: 10px;
+            display: flex; align-items: center; justify-content: center; gap: 3px;
+        }
+        .bar { width: 4px; background: #00d9ff; border-radius: 2px; height: 20%; }
+        .visualizer.active .bar { animation: wave 0.5s infinite ease-in-out; }
+        @keyframes wave { 0%, 100% { height: 20%; } 50% { height: 80%; } }
+        .bar:nth-child(1) { animation-delay: 0s; }
+        .bar:nth-child(2) { animation-delay: 0.1s; }
+        .bar:nth-child(3) { animation-delay: 0.2s; }
+        .bar:nth-child(4) { animation-delay: 0.3s; }
+        .bar:nth-child(5) { animation-delay: 0.2s; }
+        .bar:nth-child(6) { animation-delay: 0.1s; }
+        select {
+            background: rgba(0,0,0,0.3); color: white; border: 1px solid #444;
+            padding: 8px 12px; border-radius: 8px; font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌐 Traductor en Vivo</h1>
+        
+        <!-- Call Controls -->
+        <div class="panel">
+            <h2>📞 Llamada</h2>
+            <div class="controls">
+                <button id="callBtn" onclick="makeCall()">📞 Llamar</button>
+                <button id="hangupBtn" class="hangup" onclick="hangupCall()" disabled>📴 Colgar</button>
+                <div class="toggle-box">
+                    <span>Traducción</span>
+                    <div id="transToggle" class="toggle on" onclick="toggleTranslation()"></div>
+                </div>
+                <select id="agentLang" onchange="updateLangs()">
+                    <option value="en">Agente: Inglés</option>
+                    <option value="es">Agente: Español</option>
+                </select>
+                <select id="clientLang" onchange="updateLangs()">
+                    <option value="es" selected>Cliente: Español</option>
+                    <option value="en">Cliente: Inglés</option>
+                </select>
+            </div>
+        </div>
+        
+        <!-- Microphone -->
+        <div class="panel">
+            <h2>🎤 Micrófono</h2>
+            <div class="controls" style="margin-bottom: 10px;">
+                <button id="micBtn" onclick="toggleMic()">🎤 Activar</button>
+                <button id="muteBtn" onclick="toggleMute()" disabled>🔇 Silenciar</button>
+            </div>
+            <div class="visualizer" id="viz">
+                <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+                <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+            </div>
+        </div>
+        
+        <!-- Status -->
+        <div class="panel">
+            <h2>📊 Estado</h2>
+            <div class="status">
+                <div class="status-item off" id="callStatus">📴 Sin llamada</div>
+                <div class="status-item" id="micStatus">🎤 Mic: OFF</div>
+                <div class="status-item on" id="transStatus">🌐 Traducción: ON</div>
+            </div>
+        </div>
+        
+        <!-- Logs -->
+        <div class="panel">
+            <h2>📝 Conversación</h2>
+            <div class="logs" id="logs">
+                <div class="log system">Sistema listo...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // State
+        let ws = null;
+        let mediaStream = null;
+        let audioCtx = null;
+        let isMicOn = false;
+        let isMuted = false;
+        let isInCall = false;
+        let transEnabled = true;
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            connectWS();
+            setInterval(fetchLogs, 500);
+        });
+        
+        // WebSocket connection
+        function connectWS() {
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${proto}//${location.host}/ws/browser`);
+            
+            ws.onopen = () => console.log('WS connected');
+            ws.onclose = () => setTimeout(connectWS, 2000);
+            ws.onerror = (e) => console.error('WS error', e);
+            
+            ws.onmessage = async (e) => {
+                const msg = JSON.parse(e.data);
+                if (msg.type === 'audio') {
+                    await playAudio(msg.data);
+                }
+            };
+        }
+        
+        // Play received audio
+        async function playAudio(b64) {
+            try {
+                if (!audioCtx) {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 8000 });
+                }
+                
+                const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+                const pcm = new Int16Array(bytes.buffer);
+                const float = new Float32Array(pcm.length);
+                for (let i = 0; i < pcm.length; i++) float[i] = pcm[i] / 32768;
+                
+                const buf = audioCtx.createBuffer(1, float.length, 8000);
+                buf.getChannelData(0).set(float);
+                
+                const src = audioCtx.createBufferSource();
+                src.buffer = buf;
+                src.connect(audioCtx.destination);
+                src.start();
+            } catch (e) {
+                console.error('Play error', e);
+            }
+        }
+        
+        // Make call
+        async function makeCall() {
+            document.getElementById('callBtn').disabled = true;
+            try {
+                const res = await fetch('/call/outbound?to_number=%2B34651351636', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    isInCall = true;
+                    updateStatus();
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+        
+        // Hangup
+        function hangupCall() {
+            isInCall = false;
+            stopMic();
+            updateStatus();
+        }
+        
+        // Toggle translation
+        function toggleTranslation() {
+            transEnabled = !transEnabled;
+            document.getElementById('transToggle').classList.toggle('on', transEnabled);
+            document.getElementById('transStatus').textContent = `🌐 Traducción: ${transEnabled ? 'ON' : 'OFF'}`;
+            document.getElementById('transStatus').classList.toggle('on', transEnabled);
+            
+            fetch('/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ translation_enabled: transEnabled })
+            });
+        }
+        
+        // Update languages
+        function updateLangs() {
+            const agent = document.getElementById('agentLang').value;
+            const client = document.getElementById('clientLang').value;
+            fetch('/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ agent_lang: agent, client_lang: client })
+            });
+        }
+        
+        // Toggle microphone
+        async function toggleMic() {
+            if (!isMicOn) await startMic();
+            else stopMic();
+        }
+        
+        // Start microphone
+        async function startMic() {
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 8000 }
+                });
+                
+                const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 8000 });
+                const src = ctx.createMediaStreamSource(mediaStream);
+                const proc = ctx.createScriptProcessor(4096, 1, 1);
+                
+                proc.onaudioprocess = (e) => {
+                    if (isMuted || !isInCall) return;
+                    
+                    const input = e.inputBuffer.getChannelData(0);
+                    const pcm = new Int16Array(input.length);
+                    for (let i = 0; i < input.length; i++) {
+                        pcm[i] = Math.max(-1, Math.min(1, input[i])) * 0x7FFF;
+                    }
+                    
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        const b64 = btoa(String.fromCharCode(...new Uint8Array(pcm.buffer)));
+                        ws.send(JSON.stringify({ type: 'audio', data: b64 }));
+                    }
+                };
+                
+                src.connect(proc);
+                proc.connect(ctx.destination);
+                
+                isMicOn = true;
+                updateStatus();
+                document.getElementById('viz').classList.add('active');
+                document.getElementById('micBtn').classList.add('active');
+                document.getElementById('micBtn').textContent = '🎤 Desactivar';
+                document.getElementById('muteBtn').disabled = false;
+                
+            } catch (e) {
+                console.error('Mic error', e);
+            }
+        }
+        
+        // Stop microphone
+        function stopMic() {
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(t => t.stop());
+                mediaStream = null;
+            }
+            isMicOn = false;
+            isMuted = false;
+            updateStatus();
+            document.getElementById('viz').classList.remove('active');
+            document.getElementById('micBtn').classList.remove('active');
+            document.getElementById('micBtn').textContent = '🎤 Activar';
+            document.getElementById('muteBtn').disabled = true;
+        }
+        
+        // Toggle mute
+        function toggleMute() {
+            isMuted = !isMuted;
+            document.getElementById('muteBtn').textContent = isMuted ? '🔊 Unmute' : '🔇 Silenciar';
+            updateStatus();
+        }
+        
+        // Update status display
+        function updateStatus() {
+            const call = document.getElementById('callStatus');
+            const mic = document.getElementById('micStatus');
+            const callBtn = document.getElementById('callBtn');
+            const hangBtn = document.getElementById('hangupBtn');
+            
+            call.textContent = isInCall ? '📞 En llamada' : '📴 Sin llamada';
+            call.className = `status-item ${isInCall ? 'on' : 'off'}`;
+            callBtn.disabled = isInCall;
+            hangBtn.disabled = !isInCall;
+            
+            mic.textContent = isMuted ? '🔇 Silenciado' : (isMicOn ? '🎤 Mic: ON' : '🎤 Mic: OFF');
+        }
+        
+        // Fetch logs
+        async function fetchLogs() {
+            try {
+                const res = await fetch('/logs');
+                const data = await res.json();
+                const div = document.getElementById('logs');
+                
+                if (data.logs && data.logs.length) {
+                    div.innerHTML = data.logs.map(l => {
+                        let cls = 'system';
+                        if (l.message.includes('Cliente')) cls = 'client';
+                        else if (l.message.includes('Agente')) cls = 'agent';
+                        else if (l.message.includes('→')) cls = 'trans';
+                        return `<div class="log ${cls}">${l.message}</div>`;
+                    }).join('');
+                    div.scrollTop = div.scrollHeight;
+                }
+            } catch (e) {}
+        }
+    </script>
+</body>
+</html>

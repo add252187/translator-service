@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Traductor de Llamadas - Panel de Control</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5rem;
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .card {
+            background: rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 24px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .card h2 {
+            margin-bottom: 20px;
+            font-size: 1.3rem;
+            color: #00d9ff;
+        }
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ff4444;
+        }
+        .status-dot.active {
+            background: #00ff88;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .btn {
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            color: #1a1a2e;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin: 5px;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(0,217,255,0.4);
+        }
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .btn-danger {
+            background: linear-gradient(90deg, #ff4444, #ff6b6b);
+        }
+        input[type="tel"] {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            font-size: 1.1rem;
+            margin-bottom: 15px;
+        }
+        input[type="tel"]::placeholder {
+            color: rgba(255,255,255,0.5);
+        }
+        .logs {
+            background: #0a0a1a;
+            border-radius: 8px;
+            padding: 15px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+        }
+        .log-entry {
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .log-entry.info { color: #00d9ff; }
+        .log-entry.success { color: #00ff88; }
+        .log-entry.error { color: #ff4444; }
+        .log-entry.audio { color: #ffaa00; }
+        .translation-box {
+            background: #0a0a1a;
+            border-radius: 8px;
+            padding: 15px;
+            min-height: 150px;
+            margin-bottom: 15px;
+        }
+        .translation-box h3 {
+            font-size: 0.9rem;
+            color: #888;
+            margin-bottom: 10px;
+        }
+        .translation-text {
+            font-size: 1.2rem;
+            line-height: 1.6;
+        }
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .metric {
+            text-align: center;
+            padding: 15px;
+            background: rgba(0,217,255,0.1);
+            border-radius: 8px;
+        }
+        .metric-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #00d9ff;
+        }
+        .metric-label {
+            font-size: 0.8rem;
+            color: #888;
+            margin-top: 5px;
+        }
+        .full-width {
+            grid-column: 1 / -1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌐 Traductor de Llamadas en Tiempo Real</h1>
+        
+        <div class="grid">
+            <!-- Panel de Control -->
+            <div class="card">
+                <h2>📞 Control de Llamadas</h2>
+                <div class="status">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span id="statusText">Desconectado</span>
+                </div>
+                <input type="tel" id="phoneNumber" placeholder="+34 651 351 636" value="+34651351636">
+                <div>
+                    <button class="btn" id="callBtn" onclick="makeCall()">📞 Llamar</button>
+                    <button class="btn btn-danger" id="hangupBtn" onclick="hangUp()" disabled>📴 Colgar</button>
+                </div>
+                
+                <div class="metrics">
+                    <div class="metric">
+                        <div class="metric-value" id="activeCalls">0</div>
+                        <div class="metric-label">Llamadas Activas</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value" id="sttCount">0</div>
+                        <div class="metric-label">Transcripciones</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value" id="ttsCount">0</div>
+                        <div class="metric-label">Traducciones</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Traducciones -->
+            <div class="card">
+                <h2>🔄 Traducciones en Tiempo Real</h2>
+                <div class="translation-box">
+                    <h3>🎤 Original (detectado automáticamente)</h3>
+                    <div class="translation-text" id="originalText">Esperando audio...</div>
+                </div>
+                <div class="translation-box">
+                    <h3>🇪🇸 Traducción al Español</h3>
+                    <div class="translation-text" id="translatedText">Esperando traducción...</div>
+                </div>
+            </div>
+            
+            <!-- Logs -->
+            <div class="card full-width">
+                <h2>📋 Logs del Sistema</h2>
+                <div class="logs" id="logs"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let currentCallSid = null;
+        let pollInterval = null;
+        
+        function addLog(message, type = 'info') {
+            const logs = document.getElementById('logs');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logs.insertBefore(entry, logs.firstChild);
+        }
+        
+        async function makeCall() {
+            const phone = document.getElementById('phoneNumber').value;
+            addLog(`Iniciando llamada a ${phone}...`, 'info');
+            
+            try {
+                const response = await fetch(`/call/outbound?to_number=${encodeURIComponent(phone)}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentCallSid = data.call_sid;
+                    addLog(`Llamada iniciada: ${data.call_sid}`, 'success');
+                    document.getElementById('statusDot').classList.add('active');
+                    document.getElementById('statusText').textContent = 'Llamando...';
+                    document.getElementById('callBtn').disabled = true;
+                    document.getElementById('hangupBtn').disabled = false;
+                    
+                    // Start polling for updates
+                    startPolling();
+                } else {
+                    addLog(`Error: ${data.detail}`, 'error');
+                }
+            } catch (error) {
+                addLog(`Error: ${error.message}`, 'error');
+            }
+        }
+        
+        async function hangUp() {
+            if (!currentCallSid) return;
+            
+            try {
+                await fetch(`/calls/${currentCallSid}/end`, { method: 'POST' });
+                addLog('Llamada terminada', 'info');
+                resetUI();
+            } catch (error) {
+                addLog(`Error al colgar: ${error.message}`, 'error');
+            }
+        }
+        
+        function resetUI() {
+            currentCallSid = null;
+            document.getElementById('statusDot').classList.remove('active');
+            document.getElementById('statusText').textContent = 'Desconectado';
+            document.getElementById('callBtn').disabled = false;
+            document.getElementById('hangupBtn').disabled = true;
+            stopPolling();
+        }
+        
+        function startPolling() {
+            pollInterval = setInterval(updateStatus, 1000);
+        }
+        
+        function stopPolling() {
+            if (pollInterval) {
+                clearInterval(pollInterval);
+                pollInterval = null;
+            }
+        }
+        
+        async function updateStatus() {
+            try {
+                // Get active calls
+                const callsResponse = await fetch('/calls');
+                const callsData = await callsResponse.json();
+                document.getElementById('activeCalls').textContent = callsData.total;
+                
+                if (callsData.total > 0 && callsData.sessions.length > 0) {
+                    document.getElementById('statusText').textContent = 'En llamada';
+                    
+                    // Get metrics from first session
+                    const session = callsData.sessions[0];
+                    if (session.metrics) {
+                        document.getElementById('sttCount').textContent = session.metrics.stt_count || 0;
+                        document.getElementById('ttsCount').textContent = session.metrics.translation_count || 0;
+                    }
+                } else if (currentCallSid) {
+                    // Call might have ended
+                    addLog('Llamada finalizada', 'info');
+                    resetUI();
+                }
+                
+                // Get metrics
+                const metricsResponse = await fetch('/metrics');
+                const metricsData = await metricsResponse.json();
+                
+            } catch (error) {
+                console.error('Error updating status:', error);
+            }
+        }
+        
+        // Initial status check
+        updateStatus();
+        addLog('Panel de control iniciado', 'success');
+    </script>
+</body>
+</html>

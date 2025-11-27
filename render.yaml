@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: translator-service
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn streaming_translator:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: DEEPL_API_KEY
+        sync: false
+      - key: ELEVENLABS_TTS_API_KEY
+        sync: false
+      - key: GOOGLE_APPLICATION_CREDENTIALS
+        sync: false
+      - key: TTS_ENGINE
+        sync: false
+      - key: WEBHOOK_BASE_URL
+        sync: false
