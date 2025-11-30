@@ -23,6 +23,7 @@ from collections import deque
 from google.cloud import texttospeech
 from concurrent.futures import ThreadPoolExecutor
 from openai import AsyncOpenAI
+import time
 
 load_dotenv()
 
@@ -137,6 +138,10 @@ class StreamingCall:
         # Deepgram streaming connections
         self.client_deepgram_ws = None
         self.agent_deepgram_ws = None
+        self.client_keepalive_task: Optional[asyncio.Task] = None
+        self.agent_keepalive_task: Optional[asyncio.Task] = None
+        self.client_last_audio = time.time()
+        self.agent_last_audio = time.time()
         
         # Audio queues for smooth playback
         self.agent_audio_queue = asyncio.Queue()
@@ -157,14 +162,20 @@ class StreamingCall:
     async def start_deepgram_client(self):
         """Start Deepgram streaming for client audio"""
         try:
-            # Multi-language support with Spanish, English, Portuguese, French, German, Italian
-            url = "wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=8000&channels=1&punctuate=true&interim_results=false&endpointing=500&model=nova-2&language=multi"
+            # Cliente habla gallego/catalán/vasco - Deepgram detecta automáticamente
+            # endpointing=200 para menor latencia (respuesta más rápida)
+            url = "wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=8000&channels=1&punctuate=false&interim_results=true&endpointing=200&model=nova-2&language=multi"
             
             log("🔄 Conectando Deepgram cliente...")
             self.client_deepgram_ws = await websockets.connect(
                 url,
                 extra_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"}
             )
+            self.client_last_audio = time.time()
+            if self.client_keepalive_task:
+                self.client_keepalive_task.cancel()
+            self.client_keepalive_task = asyncio.create_task(self._deepgram_keepalive("client"))
+            await self._send_initial_silence(self.client_deepgram_ws)
             
             # Start receiving transcripts
             asyncio.create_task(self._receive_client_transcripts())
@@ -178,14 +189,19 @@ class StreamingCall:
     async def start_deepgram_agent(self):
         """Start Deepgram streaming for agent audio"""
         try:
-            # Multi-language for agent too
-            url = "wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=8000&channels=1&punctuate=true&interim_results=false&endpointing=500&model=nova-2&language=multi"
+            # Agente habla español - usar idioma específico para mayor precisión y velocidad
+            url = "wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=8000&channels=1&punctuate=false&interim_results=true&endpointing=200&model=nova-2&language=es"
             
             log("🔄 Conectando Deepgram agente...")
             self.agent_deepgram_ws = await websockets.connect(
                 url,
                 extra_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"}
             )
+            self.agent_last_audio = time.time()
+            if self.agent_keepalive_task:
+                self.agent_keepalive_task.cancel()
+            self.agent_keepalive_task = asyncio.create_task(self._deepgram_keepalive("agent"))
+            await self._send_initial_silence(self.agent_deepgram_ws)
             
             asyncio.create_task(self._receive_agent_transcripts())
             log("🎙️ Deepgram agente conectado")
@@ -208,12 +224,14 @@ class StreamingCall:
                 if data.get("type") == "Results":
                     channel = data.get("channel", {})
                     alternatives = channel.get("alternatives", [])
+                    is_final = data.get("is_final", False)
+                    speech_final = data.get("speech_final", False)
                     
                     if alternatives:
                         transcript = alternatives[0].get("transcript", "").strip()
-                        is_final = data.get("is_final", False)
                         
-                        if transcript and is_final:
+                        # Procesar cuando hay speech_final (fin de frase) para mínima latencia
+                        if transcript and (speech_final or is_final):
                             asyncio.create_task(
                                 self._translate_and_speak_to_agent(transcript)
                             )
@@ -237,12 +255,14 @@ class StreamingCall:
                 if data.get("type") == "Results":
                     channel = data.get("channel", {})
                     alternatives = channel.get("alternatives", [])
+                    is_final = data.get("is_final", False)
+                    speech_final = data.get("speech_final", False)
                     
                     if alternatives:
                         transcript = alternatives[0].get("transcript", "").strip()
-                        is_final = data.get("is_final", False)
                         
-                        if transcript and is_final:
+                        # Procesar cuando hay speech_final (fin de frase) para mínima latencia
+                        if transcript and (speech_final or is_final):
                             asyncio.create_task(
                                 self._translate_and_speak_to_client(transcript)
                             )
@@ -269,11 +289,10 @@ class StreamingCall:
             # Log con idioma detectado
             lang_name = LANGUAGE_NAMES.get(client_lang, client_lang.upper())
             log(f"📞 Cliente ({lang_name}): {text}")
-            if text != translated:
-                log(f"🔊 → Agente escucha: {translated}")
+            log(f"🔊 → Agente escucha (ES): {translated}")
             
             # Generate TTS en español y enviar al navegador
-            await generate_and_send_to_browser(translated, agent_lang)
+            await generate_and_send_to_browser(translated, "es")  # Siempre español para el agente
             
         except Exception as e:
             log(f"❌ Error TTS agente: {e}")
@@ -287,15 +306,15 @@ class StreamingCall:
             client_lang = settings["client_lang"].lower()
             agent_lang = settings["agent_lang"].lower()  # siempre "es"
             
+            log(f"🎤 Agente (ES): {text}")
+            
             # Si cliente habla español, no traducir
             if client_lang == agent_lang:
                 translated = text
+                log(f"🔊 → Cliente (ES): {translated} [sin traducción]")
             else:
+                log(f"🔄 Traduciendo ES → {client_lang.upper()}...")
                 translated = await translate_fast(text, client_lang, source=agent_lang)
-            
-            # Log
-            log(f"🎤 Agente: {text}")
-            if text != translated:
                 lang_name = LANGUAGE_NAMES.get(client_lang, client_lang.upper())
                 log(f"🔊 → Cliente ({lang_name}): {translated}")
             
@@ -304,6 +323,8 @@ class StreamingCall:
             
         except Exception as e:
             log(f"❌ Error traducción agente: {e}")
+            import traceback
+            traceback.print_exc()
     
     async def send_client_audio(self, pcm_audio: bytes):
         """Send client audio to Deepgram for streaming STT"""
@@ -318,9 +339,11 @@ class StreamingCall:
         if self.client_deepgram_ws:
             try:
                 await self.client_deepgram_ws.send(pcm_audio)
+                self.client_last_audio = time.time()
             except Exception as e:
                 log(f"❌ Error enviando a Deepgram cliente: {e}")
-    
+                await self.start_deepgram_client()
+
     async def send_agent_audio(self, pcm_audio: bytes):
         """Send agent audio to Deepgram for streaming STT"""
         self.agent_audio.extend(pcm_audio)
@@ -335,19 +358,24 @@ class StreamingCall:
         if self.agent_deepgram_ws:
             try:
                 await self.agent_deepgram_ws.send(pcm_audio)
+                self.agent_last_audio = time.time()
             except Exception as e:
                 log(f"❌ Error enviando a Deepgram agente: {e}")
                 # Try to reconnect
                 await self.start_deepgram_agent()
     
     async def generate_and_send_to_twilio(self, text: str, lang: str):
-        """Generate TTS and send to Twilio (Google o ElevenLabs)"""
+        """Generate TTS and send to Twilio - usa Google TTS para gallego/catalán/vasco"""
         try:
-            if TTS_ENGINE == "google":
+            # Para gallego/catalán/vasco, SIEMPRE usar Google TTS (ElevenLabs no los soporta)
+            use_google = lang in DEEPL_UNSUPPORTED or TTS_ENGINE == "google"
+            
+            if use_google:
+                log(f"📢 Generando TTS Google ({lang})...")
                 pcm_data = await synthesize_google_tts(text, lang)
                 ulaw_data = pcm_to_ulaw(pcm_data)
                 await self.send_to_twilio(ulaw_data)
-                log("🔊 Audio enviado al cliente (Google TTS)")
+                log(f"🔊 Audio enviado al cliente (Google TTS, {lang})")
             else:
                 voice_id = "EXAVITQu4vr4xnSDxMaL" if lang == "es" else "21m00Tcm4TlvDq8ikWAM"
                 async with aiohttp.ClientSession() as session:
@@ -375,7 +403,7 @@ class StreamingCall:
                             pcm_data = audio.raw_data
                             ulaw_data = pcm_to_ulaw(pcm_data)
                             await self.send_to_twilio(ulaw_data)
-                            log("🔊 Audio enviado al cliente (ElevenLabs)")
+                            log(f"🔊 Audio enviado al cliente (ElevenLabs, {lang})")
                         else:
                             log(f"❌ ElevenLabs error: {resp.status}")
         except Exception as e:
@@ -417,6 +445,48 @@ class StreamingCall:
                 await self.agent_deepgram_ws.close()
             except:
                 pass
+        if self.client_keepalive_task:
+            self.client_keepalive_task.cancel()
+            self.client_keepalive_task = None
+        if self.agent_keepalive_task:
+            self.agent_keepalive_task.cancel()
+            self.agent_keepalive_task = None
+    
+    async def _send_initial_silence(self, ws):
+        """Send a short silence burst to keep Deepgram stream alive until real audio arrives"""
+        try:
+            silence = b"\x00" * 1600  # 100ms of silence at 8kHz mono 16-bit
+            await ws.send(silence)
+        except Exception as e:
+            log(f"⚠️ Error enviando silencio inicial: {e}")
+    
+    async def _deepgram_keepalive(self, kind: str):
+        """Periodically send silence to prevent Deepgram timeouts"""
+        try:
+            while self.active:
+                await asyncio.sleep(2)
+                ws = self.client_deepgram_ws if kind == "client" else self.agent_deepgram_ws
+                if not ws:
+                    break
+                last_audio = self.client_last_audio if kind == "client" else self.agent_last_audio
+                if time.time() - last_audio > 5:
+                    try:
+                        silence = b"\x00" * 1600
+                        await ws.send(silence)
+                        if kind == "client":
+                            self.client_last_audio = time.time()
+                        else:
+                            self.agent_last_audio = time.time()
+                        log(f"🛟 Deepgram keepalive ({kind})")
+                    except Exception as e:
+                        log(f"⚠️ Keepalive {kind} falló: {e}")
+                        if kind == "client":
+                            await self.start_deepgram_client()
+                        else:
+                            await self.start_deepgram_agent()
+                        break
+        except asyncio.CancelledError:
+            pass
 
 
 async def translate_fast(text: str, target: str, source: str = None) -> str:
@@ -427,35 +497,39 @@ async def translate_fast(text: str, target: str, source: str = None) -> str:
     target_base = target.lower().split("-")[0]
     source_base = source.lower().split("-")[0] if source else None
     
-    # Si origen o destino es gallego/catalán/vasco, usar OpenAI
-    if target_base in DEEPL_UNSUPPORTED or (source_base and source_base in DEEPL_UNSUPPORTED):
+    # Si origen o destino es gallego/catalán/vasco, SOLO usar OpenAI (DeepL no soporta)
+    needs_openai = target_base in DEEPL_UNSUPPORTED or (source_base and source_base in DEEPL_UNSUPPORTED)
+    
+    if needs_openai:
+        if not OPENAI_API_KEY:
+            log(f"⚠️ OpenAI API key no configurada - no se puede traducir {source_base} → {target_base}")
+            return text
+        
         try:
-            if not openai_client and OPENAI_API_KEY:
+            if not openai_client:
                 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
             
-            if openai_client:
-                target_name = LANGUAGE_NAMES.get(target_base, target)
-                source_name = LANGUAGE_NAMES.get(source_base, "the detected language") if source_base else "the detected language"
-                
-                response = await openai_client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": f"You are a professional translator. Translate the following text from {source_name} to {target_name}. Return ONLY the translation, nothing else."},
-                        {"role": "user", "content": text}
-                    ],
-                    temperature=0.3,
-                    max_tokens=500
-                )
-                translated = response.choices[0].message.content.strip()
-                log(f"🤖 OpenAI: {source_base or '?'} → {target_base}")
-                return translated
+            target_name = LANGUAGE_NAMES.get(target_base, target)
+            source_name = LANGUAGE_NAMES.get(source_base, "the detected language") if source_base else "the detected language"
+            
+            response = await openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": f"You are a professional translator. Translate the following text from {source_name} to {target_name}. Return ONLY the translation, nothing else."},
+                    {"role": "user", "content": text}
+                ],
+                temperature=0.3,
+                max_tokens=500
+            )
+            translated = response.choices[0].message.content.strip()
+            log(f"🤖 OpenAI: {source_base or '?'} → {target_base}")
+            return translated
         except Exception as e:
             log(f"❌ OpenAI error: {e}")
             return text
     
-    # Usar DeepL para idiomas soportados
+    # Usar DeepL solo para idiomas soportados (es, en, etc.)
     try:
-        # DeepL usa códigos específicos
         deepl_target = target.upper()
         if deepl_target == "EN":
             deepl_target = "EN-US"
@@ -483,10 +557,9 @@ async def generate_and_send_to_browser(text: str, lang: str):
             # 16kHz * 2 bytes * 0.1s = 3200 bytes por chunk
             chunk_size = browser_rate * 2 // 10  # 100ms chunks
             
-            for i in range(0, len(pcm_data), chunk_size):
-                await send_to_browser(pcm_data[i:i+chunk_size], sample_rate=browser_rate)
-                await asyncio.sleep(0.08)  # Slightly less than 100ms for smooth playback
-            log("🔊 Audio enviado al agente (Google TTS)")
+            # Enviar todo el audio de una vez para mínima latencia
+            await send_to_browser(pcm_data, sample_rate=browser_rate)
+            log(f"🔊 Audio enviado al agente (Google TTS, {lang})")
         else:
             voice_id = "EXAVITQu4vr4xnSDxMaL" if lang == "es" else "21m00Tcm4TlvDq8ikWAM"
             async with aiohttp.ClientSession() as session:
@@ -517,10 +590,9 @@ async def generate_and_send_to_browser(text: str, lang: str):
                         audio = audio.normalize()
                         pcm_data = audio.raw_data
                         chunk_size = browser_rate * 2 // 10  # 100ms chunks
-                        for i in range(0, len(pcm_data), chunk_size):
-                            await send_to_browser(pcm_data[i:i+chunk_size], sample_rate=browser_rate)
-                            await asyncio.sleep(0.08)
-                        log("🔊 Audio enviado al agente (ElevenLabs)")
+                        # Enviar todo el audio de una vez para mínima latencia
+                        await send_to_browser(pcm_data, sample_rate=browser_rate)
+                        log(f"🔊 Audio enviado al agente (ElevenLabs, {lang})")
                     else:
                         log(f"❌ ElevenLabs error: {resp.status} - {await resp.text()}")
     except Exception as e:
