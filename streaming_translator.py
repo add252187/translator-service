@@ -163,8 +163,10 @@ class StreamingCall:
         """Start Deepgram streaming for client audio"""
         try:
             # Cliente habla gallego/catalán/vasco - Deepgram detecta automáticamente
-            # endpointing=800 para esperar frases completas (evita palabra por palabra)
-            url = "wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=8000&channels=1&punctuate=true&interim_results=false&endpointing=800&model=nova-2&language=multi"
+            # endpointing=400 - balance entre latencia y frases completas
+            # vad_events=true - detecta inicio/fin de voz
+            # smart_format=true - mejor formato de números/fechas
+            url = "wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=8000&channels=1&punctuate=true&interim_results=false&endpointing=400&vad_events=true&smart_format=true&model=nova-2&language=multi"
             
             log("🔄 Conectando Deepgram cliente...")
             self.client_deepgram_ws = await websockets.connect(
@@ -189,9 +191,9 @@ class StreamingCall:
     async def start_deepgram_agent(self):
         """Start Deepgram streaming for agent audio"""
         try:
-            # Agente habla español - usar idioma específico para mayor precisión
-            # endpointing=800 para esperar frases completas
-            url = "wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=8000&channels=1&punctuate=true&interim_results=false&endpointing=800&model=nova-2&language=es"
+            # Agente habla español - idioma específico para mayor velocidad
+            # endpointing=400 - balance entre latencia y frases completas
+            url = "wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=8000&channels=1&punctuate=true&interim_results=false&endpointing=400&vad_events=true&smart_format=true&model=nova-2&language=es"
             
             log("🔄 Conectando Deepgram agente...")
             self.agent_deepgram_ws = await websockets.connect(
@@ -364,8 +366,7 @@ class StreamingCall:
     async def generate_and_send_to_twilio(self, text: str, lang: str):
         """Generate TTS and send to Twilio - ElevenLabs para todo (soporta cualquier idioma)"""
         try:
-            # ElevenLabs puede sintetizar texto en cualquier idioma
-            # Usar modelo eleven_multilingual_v2 para mejor soporte de idiomas
+            # ElevenLabs con modelo turbo para menor latencia
             voice_id = "EXAVITQu4vr4xnSDxMaL"  # Sarah - voz femenina natural
             async with aiohttp.ClientSession() as session:
                 url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
@@ -376,10 +377,10 @@ class StreamingCall:
                 }
                 data = {
                     "text": text,
-                    "model_id": "eleven_multilingual_v2",  # Mejor para idiomas no-inglés
+                    "model_id": "eleven_turbo_v2_5",  # Turbo para menor latencia
                     "voice_settings": {
-                        "stability": 0.5,
-                        "similarity_boost": 0.75
+                        "stability": 0.4,  # Menos estabilidad = más rápido
+                        "similarity_boost": 0.7
                     }
                 }
                 async with session.post(url, headers=headers, json=data) as resp:
@@ -551,7 +552,8 @@ async def generate_and_send_to_browser(text: str, lang: str):
             await send_to_browser(pcm_data, sample_rate=browser_rate)
             log(f"🔊 Audio enviado al agente (Google TTS, {lang})")
         else:
-            voice_id = "EXAVITQu4vr4xnSDxMaL" if lang == "es" else "21m00Tcm4TlvDq8ikWAM"
+            # ElevenLabs turbo para menor latencia
+            voice_id = "EXAVITQu4vr4xnSDxMaL"  # Sarah
             async with aiohttp.ClientSession() as session:
                 url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
                 headers = {
@@ -561,10 +563,10 @@ async def generate_and_send_to_browser(text: str, lang: str):
                 }
                 data = {
                     "text": text,
-                    "model_id": "eleven_turbo_v2_5",
+                    "model_id": "eleven_turbo_v2_5",  # Turbo para menor latencia
                     "voice_settings": {
-                        "stability": 0.5,
-                        "similarity_boost": 0.75
+                        "stability": 0.4,
+                        "similarity_boost": 0.7
                     }
                 }
                 async with session.post(url, headers=headers, json=data) as resp:
@@ -573,14 +575,9 @@ async def generate_and_send_to_browser(text: str, lang: str):
                         from pydub import AudioSegment
                         import io
                         audio = AudioSegment.from_mp3(io.BytesIO(mp3_data))
-                        # Usar sample rate más alto para mejor calidad
                         browser_rate = settings.get("browser_sample_rate", 16000)
                         audio = audio.set_frame_rate(browser_rate).set_channels(1).set_sample_width(2)
-                        # Normalizar volumen para mejor calidad
-                        audio = audio.normalize()
                         pcm_data = audio.raw_data
-                        chunk_size = browser_rate * 2 // 10  # 100ms chunks
-                        # Enviar todo el audio de una vez para mínima latencia
                         await send_to_browser(pcm_data, sample_rate=browser_rate)
                         log(f"🔊 Audio enviado al agente (ElevenLabs, {lang})")
                     else:
