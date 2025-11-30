@@ -163,8 +163,9 @@ class StreamingCall:
         """Start Deepgram streaming for client audio"""
         try:
             # Cliente habla gallego/catalán/vasco - Deepgram detecta automáticamente
-            # endpointing=200 para menor latencia (respuesta más rápida)
-            url = "wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=8000&channels=1&punctuate=false&interim_results=true&endpointing=200&model=nova-2&language=multi"
+            # endpointing=800 para esperar frases completas (evita palabra por palabra)
+            # utterance_end_ms=1500 para detectar fin de turno de habla
+            url = "wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=8000&channels=1&punctuate=true&interim_results=false&endpointing=800&utterance_end_ms=1500&model=nova-2&language=multi"
             
             log("🔄 Conectando Deepgram cliente...")
             self.client_deepgram_ws = await websockets.connect(
@@ -189,8 +190,9 @@ class StreamingCall:
     async def start_deepgram_agent(self):
         """Start Deepgram streaming for agent audio"""
         try:
-            # Agente habla español - usar idioma específico para mayor precisión y velocidad
-            url = "wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=8000&channels=1&punctuate=false&interim_results=true&endpointing=200&model=nova-2&language=es"
+            # Agente habla español - usar idioma específico para mayor precisión
+            # endpointing=800 para esperar frases completas
+            url = "wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=8000&channels=1&punctuate=true&interim_results=false&endpointing=800&utterance_end_ms=1500&model=nova-2&language=es"
             
             log("🔄 Conectando Deepgram agente...")
             self.agent_deepgram_ws = await websockets.connect(
@@ -225,13 +227,12 @@ class StreamingCall:
                     channel = data.get("channel", {})
                     alternatives = channel.get("alternatives", [])
                     is_final = data.get("is_final", False)
-                    speech_final = data.get("speech_final", False)
                     
-                    if alternatives:
+                    if alternatives and is_final:
                         transcript = alternatives[0].get("transcript", "").strip()
                         
-                        # Procesar cuando hay speech_final (fin de frase) para mínima latencia
-                        if transcript and (speech_final or is_final):
+                        # Solo procesar transcripciones finales con contenido
+                        if transcript:
                             asyncio.create_task(
                                 self._translate_and_speak_to_agent(transcript)
                             )
@@ -256,13 +257,12 @@ class StreamingCall:
                     channel = data.get("channel", {})
                     alternatives = channel.get("alternatives", [])
                     is_final = data.get("is_final", False)
-                    speech_final = data.get("speech_final", False)
                     
-                    if alternatives:
+                    if alternatives and is_final:
                         transcript = alternatives[0].get("transcript", "").strip()
                         
-                        # Procesar cuando hay speech_final (fin de frase) para mínima latencia
-                        if transcript and (speech_final or is_final):
+                        # Solo procesar transcripciones finales con contenido
+                        if transcript:
                             asyncio.create_task(
                                 self._translate_and_speak_to_client(transcript)
                             )
