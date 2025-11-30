@@ -155,6 +155,8 @@ logs/
 .env.local
 .env.production
 
+!.python-version
+
 # Audio files (for testing)
 *.wav
 *.mp3
