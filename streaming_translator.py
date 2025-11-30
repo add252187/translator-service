@@ -22,13 +22,26 @@ from typing import Optional, List
 from collections import deque
 from google.cloud import texttospeech
 from concurrent.futures import ThreadPoolExecutor
+from openai import AsyncOpenAI
 
 load_dotenv()
 
 tts_executor = ThreadPoolExecutor(max_workers=4)
 
-def synthesize_google_tts_sync(text: str, lang: str = "es") -> bytes:
-    lang_code = "es-ES" if lang == "es" else "en-US"
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+openai_client: Optional[AsyncOpenAI] = None
+
+def synthesize_google_tts_sync(text: str, lang: str = "es", sample_rate: int = 8000) -> bytes:
+    # Mapeo de códigos de idioma a códigos de Google TTS
+    LANG_CODES = {
+        "es": "es-ES",
+        "en": "en-US",
+        "gl": "gl-ES",  # Gallego
+        "ca": "ca-ES",  # Catalán
+        "eu": "eu-ES",  # Vasco/Euskera
+    }
+    lang_code = LANG_CODES.get(lang.lower(), "es-ES")
+    
     input_text = texttospeech.SynthesisInput(text=text)
     voice = texttospeech.VoiceSelectionParams(
         language_code=lang_code,
@@ -36,7 +49,7 @@ def synthesize_google_tts_sync(text: str, lang: str = "es") -> bytes:
     )
     audio_config = texttospeech.AudioConfig(
         audio_encoding=texttospeech.AudioEncoding.LINEAR16,
-        sample_rate_hertz=8000
+        sample_rate_hertz=sample_rate
     )
     google_tts_client = texttospeech.TextToSpeechClient()
     response = google_tts_client.synthesize_speech(
@@ -44,9 +57,15 @@ def synthesize_google_tts_sync(text: str, lang: str = "es") -> bytes:
     )
     return response.audio_content
 
-async def synthesize_google_tts(text: str, lang: str = "es") -> bytes:
+async def synthesize_google_tts(text: str, lang: str = "es", sample_rate: int = 8000) -> bytes:
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(tts_executor, synthesize_google_tts_sync, text, lang)
+    return await loop.run_in_executor(
+        tts_executor,
+        synthesize_google_tts_sync,
+        text,
+        lang,
+        sample_rate,
+    )
 
 TTS_ENGINE = os.getenv("TTS_ENGINE", "elevenlabs").lower()
 
@@ -73,7 +92,26 @@ deepl_translator = deepl.Translator(DEEPL_API_KEY)
 active_calls = {}
 browser_clients: List[WebSocket] = []
 logs = []
-settings = {"translation_enabled": True, "agent_lang": "en", "client_lang": "es"}
+# Idiomas soportados para clientes: gl (gallego), ca (catalán), eu (vasco), es (español)
+# El agente siempre habla español
+settings = {
+    "translation_enabled": True, 
+    "agent_lang": "es",  # Agente siempre español
+    "client_lang": "gl",  # Cliente: gl, ca, eu, es
+    "browser_sample_rate": 16000  # Mayor calidad para navegador
+}
+
+# Mapeo de idiomas para DeepL y OpenAI
+LANGUAGE_NAMES = {
+    "gl": "Galician",
+    "ca": "Catalan", 
+    "eu": "Basque",
+    "es": "Spanish",
+    "en": "English"
+}
+
+# Idiomas que DeepL NO soporta (usaremos OpenAI)
+DEEPL_UNSUPPORTED = ["gl", "ca", "eu"]
 
 RECORDINGS_DIR = os.path.join(os.path.dirname(__file__), "recordings")
 os.makedirs(RECORDINGS_DIR, exist_ok=True)
@@ -218,19 +256,24 @@ class StreamingCall:
     async def _translate_and_speak_to_agent(self, text: str):
         """Translate client text and send TTS to agent"""
         try:
-            # Translate to agent's language
-            target = settings["agent_lang"].upper()
-            if target == "EN":
-                target = "EN-US"
-            translated = await translate_fast(text, target)
+            # Cliente habla gl/ca/eu/es, traducir a español para el agente
+            client_lang = settings["client_lang"].lower()
+            agent_lang = settings["agent_lang"].lower()  # siempre "es"
             
-            # Log with clear direction
-            log(f"📞 Cliente: {text}")
+            # Si cliente habla español, no traducir
+            if client_lang == agent_lang:
+                translated = text
+            else:
+                translated = await translate_fast(text, agent_lang, source=client_lang)
+            
+            # Log con idioma detectado
+            lang_name = LANGUAGE_NAMES.get(client_lang, client_lang.upper())
+            log(f"📞 Cliente ({lang_name}): {text}")
             if text != translated:
                 log(f"🔊 → Agente escucha: {translated}")
             
-            # Generate TTS and send to browser
-            await generate_and_send_to_browser(translated, settings["agent_lang"])
+            # Generate TTS en español y enviar al navegador
+            await generate_and_send_to_browser(translated, agent_lang)
             
         except Exception as e:
             log(f"❌ Error TTS agente: {e}")
@@ -240,17 +283,24 @@ class StreamingCall:
     async def _translate_and_speak_to_client(self, text: str):
         """Translate agent text and send TTS to client"""
         try:
-            # Translate to client's language
-            target = settings["client_lang"].upper()
-            translated = await translate_fast(text, target)
+            # Agente habla español, traducir al idioma del cliente (gl/ca/eu/es)
+            client_lang = settings["client_lang"].lower()
+            agent_lang = settings["agent_lang"].lower()  # siempre "es"
             
-            # Log with clear direction
+            # Si cliente habla español, no traducir
+            if client_lang == agent_lang:
+                translated = text
+            else:
+                translated = await translate_fast(text, client_lang, source=agent_lang)
+            
+            # Log
             log(f"🎤 Agente: {text}")
             if text != translated:
-                log(f"🔊 → Cliente escucha: {translated}")
+                lang_name = LANGUAGE_NAMES.get(client_lang, client_lang.upper())
+                log(f"🔊 → Cliente ({lang_name}): {translated}")
             
-            # Generate TTS and send to Twilio
-            await self.generate_and_send_to_twilio(translated, settings["client_lang"])
+            # Generate TTS en idioma del cliente y enviar a Twilio
+            await self.generate_and_send_to_twilio(translated, client_lang)
             
         except Exception as e:
             log(f"❌ Error traducción agente: {e}")
@@ -369,24 +419,73 @@ class StreamingCall:
                 pass
 
 
-async def translate_fast(text: str, target: str) -> str:
-    """Fast translation using DeepL"""
+async def translate_fast(text: str, target: str, source: str = None) -> str:
+    """Fast translation using DeepL or OpenAI (for unsupported languages)"""
+    global openai_client
+    
+    # Normalizar códigos de idioma
+    target_base = target.lower().split("-")[0]
+    source_base = source.lower().split("-")[0] if source else None
+    
+    # Si origen o destino es gallego/catalán/vasco, usar OpenAI
+    if target_base in DEEPL_UNSUPPORTED or (source_base and source_base in DEEPL_UNSUPPORTED):
+        try:
+            if not openai_client and OPENAI_API_KEY:
+                openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+            
+            if openai_client:
+                target_name = LANGUAGE_NAMES.get(target_base, target)
+                source_name = LANGUAGE_NAMES.get(source_base, "the detected language") if source_base else "the detected language"
+                
+                response = await openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": f"You are a professional translator. Translate the following text from {source_name} to {target_name}. Return ONLY the translation, nothing else."},
+                        {"role": "user", "content": text}
+                    ],
+                    temperature=0.3,
+                    max_tokens=500
+                )
+                translated = response.choices[0].message.content.strip()
+                log(f"🤖 OpenAI: {source_base or '?'} → {target_base}")
+                return translated
+        except Exception as e:
+            log(f"❌ OpenAI error: {e}")
+            return text
+    
+    # Usar DeepL para idiomas soportados
     try:
-        result = deepl_translator.translate_text(text, target_lang=target)
+        # DeepL usa códigos específicos
+        deepl_target = target.upper()
+        if deepl_target == "EN":
+            deepl_target = "EN-US"
+        elif deepl_target == "ES":
+            deepl_target = "ES"
+        
+        result = deepl_translator.translate_text(text, target_lang=deepl_target)
         return result.text
-    except:
+    except Exception as e:
+        log(f"❌ DeepL error: {e}")
         return text
 
 
 async def generate_and_send_to_browser(text: str, lang: str):
     """Generate TTS and send to browser (Google o ElevenLabs)"""
     try:
+        # Usar sample rate más alto para mejor calidad en navegador
+        browser_rate = settings.get("browser_sample_rate", 16000)
+        
         if TTS_ENGINE == "google":
-            pcm_data = await synthesize_google_tts(text, lang)
-            chunk_size = 1600
+            # Generar audio a mayor calidad para el navegador
+            pcm_data = await synthesize_google_tts(text, lang, sample_rate=browser_rate)
+            
+            # Calcular chunk size basado en sample rate (100ms de audio)
+            # 16kHz * 2 bytes * 0.1s = 3200 bytes por chunk
+            chunk_size = browser_rate * 2 // 10  # 100ms chunks
+            
             for i in range(0, len(pcm_data), chunk_size):
-                await send_to_browser(pcm_data[i:i+chunk_size])
-                await asyncio.sleep(0.05)
+                await send_to_browser(pcm_data[i:i+chunk_size], sample_rate=browser_rate)
+                await asyncio.sleep(0.08)  # Slightly less than 100ms for smooth playback
             log("🔊 Audio enviado al agente (Google TTS)")
         else:
             voice_id = "EXAVITQu4vr4xnSDxMaL" if lang == "es" else "21m00Tcm4TlvDq8ikWAM"
@@ -411,12 +510,16 @@ async def generate_and_send_to_browser(text: str, lang: str):
                         from pydub import AudioSegment
                         import io
                         audio = AudioSegment.from_mp3(io.BytesIO(mp3_data))
-                        audio = audio.set_frame_rate(8000).set_channels(1).set_sample_width(2)
+                        # Usar sample rate más alto para mejor calidad
+                        browser_rate = settings.get("browser_sample_rate", 16000)
+                        audio = audio.set_frame_rate(browser_rate).set_channels(1).set_sample_width(2)
+                        # Normalizar volumen para mejor calidad
+                        audio = audio.normalize()
                         pcm_data = audio.raw_data
-                        chunk_size = 1600
+                        chunk_size = browser_rate * 2 // 10  # 100ms chunks
                         for i in range(0, len(pcm_data), chunk_size):
-                            await send_to_browser(pcm_data[i:i+chunk_size])
-                            await asyncio.sleep(0.05)
+                            await send_to_browser(pcm_data[i:i+chunk_size], sample_rate=browser_rate)
+                            await asyncio.sleep(0.08)
                         log("🔊 Audio enviado al agente (ElevenLabs)")
                     else:
                         log(f"❌ ElevenLabs error: {resp.status} - {await resp.text()}")
@@ -426,14 +529,15 @@ async def generate_and_send_to_browser(text: str, lang: str):
         traceback.print_exc()
 
 
-async def send_to_browser(pcm_audio: bytes):
-    """Send audio to browser clients"""
+async def send_to_browser(pcm_audio: bytes, sample_rate: int = 16000):
+    """Send audio to browser clients with sample rate info"""
     if not browser_clients:
         return
     
     msg = json.dumps({
         "type": "audio",
-        "data": base64.b64encode(pcm_audio).decode()
+        "data": base64.b64encode(pcm_audio).decode(),
+        "sampleRate": sample_rate  # Enviar sample rate al navegador
     })
     
     dead = []

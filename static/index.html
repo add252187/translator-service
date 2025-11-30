@@ -105,14 +105,13 @@
                     <span>Traducción</span>
                     <div id="transToggle" class="toggle on" onclick="toggleTranslation()"></div>
                 </div>
-                <select id="agentLang" onchange="updateLangs()">
-                    <option value="en">Agente: Inglés</option>
-                    <option value="es">Agente: Español</option>
-                </select>
                 <select id="clientLang" onchange="updateLangs()">
-                    <option value="es" selected>Cliente: Español</option>
-                    <option value="en">Cliente: Inglés</option>
+                    <option value="gl" selected>Cliente: Gallego</option>
+                    <option value="ca">Cliente: Catalán</option>
+                    <option value="eu">Cliente: Vasco</option>
+                    <option value="es">Cliente: Español</option>
                 </select>
+                <span style="color: #888; font-size: 12px;">Agente: Español</span>
             </div>
         </div>
         
@@ -176,16 +175,18 @@
             ws.onmessage = async (e) => {
                 const msg = JSON.parse(e.data);
                 if (msg.type === 'audio') {
-                    await playAudio(msg.data);
+                    await playAudio(msg.data, msg.sampleRate || 16000);
                 }
             };
         }
         
-        // Play received audio
-        async function playAudio(b64) {
+        // Play received audio with dynamic sample rate
+        async function playAudio(b64, sampleRate = 16000) {
             try {
-                if (!audioCtx) {
-                    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 8000 });
+                // Recrear contexto si el sample rate cambia
+                if (!audioCtx || audioCtx.sampleRate !== sampleRate) {
+                    if (audioCtx) audioCtx.close();
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: sampleRate });
                 }
                 
                 const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
@@ -193,7 +194,7 @@
                 const float = new Float32Array(pcm.length);
                 for (let i = 0; i < pcm.length; i++) float[i] = pcm[i] / 32768;
                 
-                const buf = audioCtx.createBuffer(1, float.length, 8000);
+                const buf = audioCtx.createBuffer(1, float.length, sampleRate);
                 buf.getChannelData(0).set(float);
                 
                 const src = audioCtx.createBufferSource();
@@ -243,12 +244,11 @@
         
         // Update languages
         function updateLangs() {
-            const agent = document.getElementById('agentLang').value;
             const client = document.getElementById('clientLang').value;
             fetch('/settings', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ agent_lang: agent, client_lang: client })
+                body: JSON.stringify({ agent_lang: 'es', client_lang: client })
             });
         }
         
