@@ -221,7 +221,6 @@ class StreamingCall:
                     break
                 
                 data = json.loads(message)
-                print(f"[Deepgram Cliente] {data.get('type', 'unknown')}")
                 
                 if data.get("type") == "Results":
                     channel = data.get("channel", {})
@@ -251,7 +250,6 @@ class StreamingCall:
                     break
                 
                 data = json.loads(message)
-                print(f"[Deepgram Agente] {data.get('type', 'unknown')}")
                 
                 if data.get("type") == "Results":
                     channel = data.get("channel", {})
