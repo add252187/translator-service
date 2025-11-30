@@ -365,47 +365,40 @@ class StreamingCall:
                 await self.start_deepgram_agent()
     
     async def generate_and_send_to_twilio(self, text: str, lang: str):
-        """Generate TTS and send to Twilio - usa Google TTS para gallego/catalán/vasco"""
+        """Generate TTS and send to Twilio - ElevenLabs para todo (soporta cualquier idioma)"""
         try:
-            # Para gallego/catalán/vasco, SIEMPRE usar Google TTS (ElevenLabs no los soporta)
-            use_google = lang in DEEPL_UNSUPPORTED or TTS_ENGINE == "google"
-            
-            if use_google:
-                log(f"📢 Generando TTS Google ({lang})...")
-                pcm_data = await synthesize_google_tts(text, lang)
-                ulaw_data = pcm_to_ulaw(pcm_data)
-                await self.send_to_twilio(ulaw_data)
-                log(f"🔊 Audio enviado al cliente (Google TTS, {lang})")
-            else:
-                voice_id = "EXAVITQu4vr4xnSDxMaL" if lang == "es" else "21m00Tcm4TlvDq8ikWAM"
-                async with aiohttp.ClientSession() as session:
-                    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
-                    headers = {
-                        "xi-api-key": ELEVENLABS_API_KEY,
-                        "Content-Type": "application/json",
-                        "Accept": "audio/mpeg"
+            # ElevenLabs puede sintetizar texto en cualquier idioma
+            # Usar modelo eleven_multilingual_v2 para mejor soporte de idiomas
+            voice_id = "EXAVITQu4vr4xnSDxMaL"  # Sarah - voz femenina natural
+            async with aiohttp.ClientSession() as session:
+                url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+                headers = {
+                    "xi-api-key": ELEVENLABS_API_KEY,
+                    "Content-Type": "application/json",
+                    "Accept": "audio/mpeg"
+                }
+                data = {
+                    "text": text,
+                    "model_id": "eleven_multilingual_v2",  # Mejor para idiomas no-inglés
+                    "voice_settings": {
+                        "stability": 0.5,
+                        "similarity_boost": 0.75
                     }
-                    data = {
-                        "text": text,
-                        "model_id": "eleven_turbo_v2_5",
-                        "voice_settings": {
-                            "stability": 0.5,
-                            "similarity_boost": 0.75
-                        }
-                    }
-                    async with session.post(url, headers=headers, json=data) as resp:
-                        if resp.status == 200:
-                            mp3_data = await resp.read()
-                            from pydub import AudioSegment
-                            import io
-                            audio = AudioSegment.from_mp3(io.BytesIO(mp3_data))
-                            audio = audio.set_frame_rate(8000).set_channels(1).set_sample_width(2)
-                            pcm_data = audio.raw_data
-                            ulaw_data = pcm_to_ulaw(pcm_data)
-                            await self.send_to_twilio(ulaw_data)
-                            log(f"🔊 Audio enviado al cliente (ElevenLabs, {lang})")
-                        else:
-                            log(f"❌ ElevenLabs error: {resp.status}")
+                }
+                async with session.post(url, headers=headers, json=data) as resp:
+                    if resp.status == 200:
+                        mp3_data = await resp.read()
+                        from pydub import AudioSegment
+                        import io
+                        audio = AudioSegment.from_mp3(io.BytesIO(mp3_data))
+                        audio = audio.set_frame_rate(8000).set_channels(1).set_sample_width(2)
+                        pcm_data = audio.raw_data
+                        ulaw_data = pcm_to_ulaw(pcm_data)
+                        await self.send_to_twilio(ulaw_data)
+                        log(f"🔊 Audio enviado al cliente (ElevenLabs, {lang})")
+                    else:
+                        error_text = await resp.text()
+                        log(f"❌ ElevenLabs error: {resp.status} - {error_text}")
         except Exception as e:
             log(f"❌ TTS Twilio error: {e}")
             import traceback
