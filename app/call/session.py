@@ -193,7 +193,7 @@ class CallSession(LoggerMixin):
         """Process audio from client: STT → Detect Language → Queue for translation."""
         audio_accumulator = bytearray()
         # Accumulate 2 seconds of audio before processing
-        min_audio_bytes = settings.audio_sample_rate * 2 * 2  # 2 seconds, 16-bit
+        min_audio_bytes = settings.audio_sample_rate * 2 // 2  # 0.5 seconds, 16-bit
         
         while self.is_active:
             try:
