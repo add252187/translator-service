@@ -164,8 +164,7 @@ class StreamingCall:
         try:
             # Cliente habla gallego/catalán/vasco - Deepgram detecta automáticamente
             # endpointing=800 para esperar frases completas (evita palabra por palabra)
-            # utterance_end_ms=1500 para detectar fin de turno de habla
-            url = "wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=8000&channels=1&punctuate=true&interim_results=false&endpointing=800&utterance_end_ms=1500&model=nova-2&language=multi"
+            url = "wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=8000&channels=1&punctuate=true&interim_results=false&endpointing=800&model=nova-2&language=multi"
             
             log("🔄 Conectando Deepgram cliente...")
             self.client_deepgram_ws = await websockets.connect(
@@ -192,7 +191,7 @@ class StreamingCall:
         try:
             # Agente habla español - usar idioma específico para mayor precisión
             # endpointing=800 para esperar frases completas
-            url = "wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=8000&channels=1&punctuate=true&interim_results=false&endpointing=800&utterance_end_ms=1500&model=nova-2&language=es"
+            url = "wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=8000&channels=1&punctuate=true&interim_results=false&endpointing=800&model=nova-2&language=es"
             
             log("🔄 Conectando Deepgram agente...")
             self.agent_deepgram_ws = await websockets.connect(
