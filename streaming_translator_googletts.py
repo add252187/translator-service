@@ -118,7 +118,7 @@ class StreamingCall:
             log("🔄 Conectando Deepgram cliente...")
             self.client_deepgram_ws = await websockets.connect(
                 url,
-                additional_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"}
+                extra_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"}
             )
             
             asyncio.create_task(self._receive_client_transcripts())
@@ -137,7 +137,7 @@ class StreamingCall:
                 self.agent_deepgram_ws = await asyncio.wait_for(
                     websockets.connect(
                         url,
-                        additional_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"}
+                        extra_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"}
                     ),
                     timeout=10
                 )

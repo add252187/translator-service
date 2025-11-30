@@ -125,7 +125,7 @@ class StreamingCall:
             log("🔄 Conectando Deepgram cliente...")
             self.client_deepgram_ws = await websockets.connect(
                 url,
-                additional_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"}
+                extra_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"}
             )
             
             # Start receiving transcripts
@@ -146,7 +146,7 @@ class StreamingCall:
             log("🔄 Conectando Deepgram agente...")
             self.agent_deepgram_ws = await websockets.connect(
                 url,
-                additional_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"}
+                extra_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"}
             )
             
             asyncio.create_task(self._receive_agent_transcripts())
