@@ -371,14 +371,21 @@ class StreamingCall:
                 await self.agent_deepgram_ws.send(pcm_audio)
                 self.agent_last_audio = time.time()
                 
-                # Debug: log cada 50 chunks (~2 segundos)
+                # Debug: log cada 100 chunks (~4 segundos)
                 self.audio_count = getattr(self, 'audio_count', 0) + 1
-                if self.audio_count % 50 == 1:
-                    log(f"🔊 Audio agente enviado: {len(pcm_audio)} bytes (chunk #{self.audio_count})")
+                if self.audio_count == 1:
+                    log(f"🎤 Primer audio agente: {len(pcm_audio)} bytes")
+                elif self.audio_count % 100 == 0:
+                    log(f"🔊 Audio agente: chunk #{self.audio_count}")
             except Exception as e:
                 log(f"❌ Error enviando a Deepgram agente: {e}")
                 # Try to reconnect
                 await self.start_deepgram_agent()
+        else:
+            # Log si no hay conexión Deepgram
+            if not hasattr(self, '_no_dg_warned'):
+                log("⚠️ Audio agente recibido pero Deepgram no conectado")
+                self._no_dg_warned = True
     
     async def generate_and_send_to_twilio(self, text: str, lang: str):
         """Generate TTS and send to Twilio - ElevenLabs para todo (soporta cualquier idioma)"""
