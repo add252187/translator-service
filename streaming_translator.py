@@ -192,6 +192,11 @@ class StreamingCall:
     
     async def start_deepgram_agent(self):
         """Start Deepgram streaming for agent audio"""
+        # Evitar crear múltiples conexiones
+        if self.agent_deepgram_ws:
+            log("⚠️ Deepgram agente ya conectado, ignorando")
+            return
+            
         try:
             # Agente habla español - usar sample rate del navegador (48kHz típicamente)
             sample_rate = getattr(self, 'agent_sample_rate', 48000)
@@ -278,8 +283,8 @@ class StreamingCall:
         except Exception as e:
             if self.active:
                 log(f"❌ Error transcripción agente: {e}")
-                import traceback
-                traceback.print_exc()
+                # Limpiar conexión para permitir reconexión
+                self.agent_deepgram_ws = None
     
     async def _translate_and_speak_to_agent(self, text: str):
         """Translate client text and send TTS to agent"""
