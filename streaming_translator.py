@@ -619,6 +619,35 @@ def resample_16k_to_8k(pcm_16k: bytes) -> bytes:
     return bytes(result)
 
 
+def resample_audio(pcm: bytes, from_rate: int, to_rate: int) -> bytes:
+    """Resample PCM audio from one rate to another"""
+    if from_rate == to_rate:
+        return pcm
+    
+    # Convert bytes to samples
+    samples = struct.unpack(f'<{len(pcm)//2}h', pcm)
+    
+    # Calculate ratio
+    ratio = to_rate / from_rate
+    new_length = int(len(samples) * ratio)
+    
+    # Simple linear interpolation resampling
+    result = []
+    for i in range(new_length):
+        src_idx = i / ratio
+        idx = int(src_idx)
+        frac = src_idx - idx
+        
+        if idx + 1 < len(samples):
+            sample = int(samples[idx] * (1 - frac) + samples[idx + 1] * frac)
+        else:
+            sample = samples[idx] if idx < len(samples) else 0
+        
+        result.append(max(-32768, min(32767, sample)))
+    
+    return struct.pack(f'<{len(result)}h', *result)
+
+
 def pcm_to_ulaw(pcm: bytes) -> bytes:
     """Convert PCM to μ-law"""
     BIAS = 0x84
@@ -745,6 +774,11 @@ async def browser_ws(websocket: WebSocket):
                 
                 if data.get("type") == "audio":
                     pcm = base64.b64decode(data["data"])
+                    browser_rate = data.get("sampleRate", 8000)
+                    
+                    # Resample if browser sends different rate
+                    if browser_rate != 8000:
+                        pcm = resample_audio(pcm, browser_rate, 8000)
                     
                     for call in active_calls.values():
                         if call.active:
@@ -752,7 +786,7 @@ async def browser_ws(websocket: WebSocket):
                             if not agent_deepgram_started and settings["translation_enabled"]:
                                 await call.start_deepgram_agent()
                                 agent_deepgram_started = True
-                                log("🎤 Micrófono agente activo")
+                                log(f"🎤 Micrófono agente activo (browser rate: {browser_rate}Hz)")
                             
                             await call.send_agent_audio(pcm)
                             
