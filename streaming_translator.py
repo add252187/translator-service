@@ -205,8 +205,8 @@ class StreamingCall:
             self.agent_last_audio = time.time()
             if self.agent_keepalive_task:
                 self.agent_keepalive_task.cancel()
-            self.agent_keepalive_task = asyncio.create_task(self._deepgram_keepalive("agent"))
-            await self._send_initial_silence(self.agent_deepgram_ws)
+            self.agent_keepalive_task = asyncio.create_task(self._deepgram_keepalive("agent", sample_rate))
+            await self._send_initial_silence(self.agent_deepgram_ws, sample_rate)
             
             asyncio.create_task(self._receive_agent_transcripts())
             log("🎙️ Deepgram agente conectado - listener iniciado")
@@ -371,18 +371,23 @@ class StreamingCall:
                 await self.agent_deepgram_ws.send(pcm_audio)
                 self.agent_last_audio = time.time()
                 
-                # Debug: log cada 100 chunks (~4 segundos)
+                # Debug: log cada 100 chunks (~4 segundos) con nivel de audio
                 self.audio_count = getattr(self, 'audio_count', 0) + 1
                 if self.audio_count == 1:
-                    log(f"🎤 Primer audio agente: {len(pcm_audio)} bytes")
+                    # Calcular nivel de audio (RMS)
+                    samples = struct.unpack(f'<{len(pcm_audio)//2}h', pcm_audio)
+                    rms = (sum(s*s for s in samples) / len(samples)) ** 0.5
+                    log(f"🎤 Primer audio agente: {len(pcm_audio)} bytes, RMS={rms:.0f}")
                 elif self.audio_count % 100 == 0:
-                    log(f"🔊 Audio agente: chunk #{self.audio_count}")
+                    samples = struct.unpack(f'<{len(pcm_audio)//2}h', pcm_audio)
+                    rms = (sum(s*s for s in samples) / len(samples)) ** 0.5
+                    log(f"🔊 Audio agente: chunk #{self.audio_count}, RMS={rms:.0f}")
             except Exception as e:
                 log(f"❌ Error enviando a Deepgram agente: {e}")
                 # Try to reconnect
                 await self.start_deepgram_agent()
         else:
-            # Log si no hay conexión Deepgram
+            # Log si no hay conexion Deepgram
             if not hasattr(self, '_no_dg_warned'):
                 log("⚠️ Audio agente recibido pero Deepgram no conectado")
                 self._no_dg_warned = True
@@ -467,15 +472,18 @@ class StreamingCall:
             self.agent_keepalive_task.cancel()
             self.agent_keepalive_task = None
     
-    async def _send_initial_silence(self, ws):
+    async def _send_initial_silence(self, ws, sample_rate: int = 8000):
         """Send a short silence burst to keep Deepgram stream alive until real audio arrives"""
         try:
-            silence = b"\x00" * 1600  # 100ms of silence at 8kHz mono 16-bit
+            # 100ms of silence at the given sample rate (16-bit mono = 2 bytes per sample)
+            num_samples = int(sample_rate * 0.1)  # 100ms
+            silence = bytes(num_samples * 2)  # 2 bytes per sample
             await ws.send(silence)
+            log(f"Silencio inicial enviado: {len(silence)} bytes @ {sample_rate}Hz")
         except Exception as e:
-            log(f"⚠️ Error enviando silencio inicial: {e}")
+            log(f"Error enviando silencio inicial: {e}")
     
-    async def _deepgram_keepalive(self, kind: str):
+    async def _deepgram_keepalive(self, kind: str, sample_rate: int = 8000):
         """Periodically send silence to prevent Deepgram timeouts"""
         try:
             while self.active:
@@ -486,7 +494,9 @@ class StreamingCall:
                 last_audio = self.client_last_audio if kind == "client" else self.agent_last_audio
                 if time.time() - last_audio > 5:
                     try:
-                        silence = b"\x00" * 1600
+                        # Silencio de 100ms al sample rate correcto
+                        num_samples = int(sample_rate * 0.1)
+                        silence = bytes(num_samples * 2)
                         await ws.send(silence)
                         if kind == "client":
                             self.client_last_audio = time.time()
