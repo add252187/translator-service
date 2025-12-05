@@ -271,8 +271,7 @@ class StreamingCall:
                         asyncio.create_task(
                             self._translate_and_speak_to_client(transcript.strip())
                         )
-                elif msg_type == "SpeechStarted":
-                    log("🔍 DG Agente: Voz detectada")
+                # Solo loguear eventos importantes, no cada SpeechStarted
                 elif msg_type == "UtteranceEnd":
                     log("🔍 DG Agente: Fin de frase")
                                     
@@ -797,9 +796,6 @@ async def browser_ws(websocket: WebSocket):
     browser_clients.append(websocket)
     log("🖥️ Navegador conectado")
     
-    # Track if we started Deepgram for agent
-    agent_deepgram_started = False
-    
     try:
         while True:
             try:
@@ -812,11 +808,10 @@ async def browser_ws(websocket: WebSocket):
                     
                     for call in active_calls.values():
                         if call.active:
-                            # Start agent Deepgram on first audio if not started
-                            if not agent_deepgram_started and settings["translation_enabled"]:
+                            # Start agent Deepgram on first audio if not already connected
+                            if not call.agent_deepgram_ws and settings["translation_enabled"]:
                                 call.agent_sample_rate = browser_rate
                                 await call.start_deepgram_agent()
-                                agent_deepgram_started = True
                                 log(f"🎤 Micrófono agente activo ({browser_rate}Hz)")
                             
                             await call.send_agent_audio(pcm)
