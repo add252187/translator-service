@@ -246,25 +246,33 @@ class StreamingCall:
     async def _receive_agent_transcripts(self):
         """Receive and process agent transcripts in real-time"""
         try:
+            log("🔍 Esperando transcripciones del agente...")
             async for message in self.agent_deepgram_ws:
                 if not self.active:
                     break
                 
                 data = json.loads(message)
+                msg_type = data.get("type", "unknown")
                 
-                if data.get("type") == "Results":
+                # Debug: log all message types from Deepgram
+                if msg_type == "Results":
                     channel = data.get("channel", {})
                     alternatives = channel.get("alternatives", [])
                     is_final = data.get("is_final", False)
+                    transcript = alternatives[0].get("transcript", "") if alternatives else ""
                     
-                    if alternatives and is_final:
-                        transcript = alternatives[0].get("transcript", "").strip()
-                        
-                        # Solo procesar transcripciones finales con contenido
-                        if transcript:
-                            asyncio.create_task(
-                                self._translate_and_speak_to_client(transcript)
-                            )
+                    # Log para debug
+                    if transcript.strip():
+                        log(f"🔍 DG Agente: '{transcript}' (final={is_final})")
+                    
+                    if alternatives and is_final and transcript.strip():
+                        asyncio.create_task(
+                            self._translate_and_speak_to_client(transcript.strip())
+                        )
+                elif msg_type == "SpeechStarted":
+                    log("🔍 DG Agente: Voz detectada")
+                elif msg_type == "UtteranceEnd":
+                    log("🔍 DG Agente: Fin de frase")
                                     
         except Exception as e:
             if self.active:
@@ -343,6 +351,8 @@ class StreamingCall:
                 log(f"❌ Error enviando a Deepgram cliente: {e}")
                 await self.start_deepgram_client()
 
+    audio_count = 0  # Debug counter
+    
     async def send_agent_audio(self, pcm_audio: bytes):
         """Send agent audio to Deepgram for streaming STT"""
         self.agent_audio.extend(pcm_audio)
@@ -358,6 +368,11 @@ class StreamingCall:
             try:
                 await self.agent_deepgram_ws.send(pcm_audio)
                 self.agent_last_audio = time.time()
+                
+                # Debug: log cada 50 chunks (~2 segundos)
+                self.audio_count = getattr(self, 'audio_count', 0) + 1
+                if self.audio_count % 50 == 1:
+                    log(f"🔊 Audio agente enviado: {len(pcm_audio)} bytes (chunk #{self.audio_count})")
             except Exception as e:
                 log(f"❌ Error enviando a Deepgram agente: {e}")
                 # Try to reconnect
