@@ -265,7 +265,7 @@
                     audio: { echoCancellation: true, noiseSuppression: true }
                 });
                 
-                // Use default sample rate and resample to 8kHz in browser
+                // Use native sample rate, send to server for processing
                 const ctx = new (window.AudioContext || window.webkitAudioContext)();
                 const nativeRate = ctx.sampleRate;
                 console.log('Native sample rate:', nativeRate);
@@ -277,28 +277,15 @@
                     if (isMuted) return;
                     
                     const input = e.inputBuffer.getChannelData(0);
+                    const pcm = new Int16Array(input.length);
                     
-                    // Resample to 8kHz in browser
-                    const ratio = 8000 / nativeRate;
-                    const newLen = Math.floor(input.length * ratio);
-                    const pcm = new Int16Array(newLen);
-                    
-                    for (let i = 0; i < newLen; i++) {
-                        const srcIdx = i / ratio;
-                        const idx = Math.floor(srcIdx);
-                        const frac = srcIdx - idx;
-                        let sample;
-                        if (idx + 1 < input.length) {
-                            sample = input[idx] * (1 - frac) + input[idx + 1] * frac;
-                        } else {
-                            sample = input[idx] || 0;
-                        }
-                        pcm[i] = Math.max(-1, Math.min(1, sample)) * 0x7FFF;
+                    for (let i = 0; i < input.length; i++) {
+                        pcm[i] = Math.max(-1, Math.min(1, input[i])) * 0x7FFF;
                     }
                     
                     if (ws && ws.readyState === WebSocket.OPEN) {
                         const b64 = btoa(String.fromCharCode(...new Uint8Array(pcm.buffer)));
-                        ws.send(JSON.stringify({ type: 'audio', data: b64 }));
+                        ws.send(JSON.stringify({ type: 'audio', data: b64, sampleRate: nativeRate }));
                     }
                 };
                 

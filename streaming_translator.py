@@ -188,14 +188,16 @@ class StreamingCall:
             import traceback
             traceback.print_exc()
     
+    agent_sample_rate = 48000  # Default, will be updated from browser
+    
     async def start_deepgram_agent(self):
         """Start Deepgram streaming for agent audio"""
         try:
-            # Agente habla español - idioma específico para mayor velocidad
-            # endpointing=400 - balance entre latencia y frases completas
-            url = "wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=8000&channels=1&punctuate=true&interim_results=false&endpointing=400&vad_events=true&smart_format=true&model=nova-2&language=es"
+            # Agente habla español - usar sample rate del navegador (48kHz típicamente)
+            sample_rate = getattr(self, 'agent_sample_rate', 48000)
+            url = f"wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate={sample_rate}&channels=1&punctuate=true&interim_results=false&endpointing=400&vad_events=true&smart_format=true&model=nova-2&language=es"
             
-            log("🔄 Conectando Deepgram agente...")
+            log(f"🔄 Conectando Deepgram agente (sample_rate={sample_rate})...")
             self.agent_deepgram_ws = await websockets.connect(
                 url,
                 extra_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"}
@@ -789,14 +791,16 @@ async def browser_ws(websocket: WebSocket):
                 
                 if data.get("type") == "audio":
                     pcm = base64.b64decode(data["data"])
+                    browser_rate = data.get("sampleRate", 48000)
                     
                     for call in active_calls.values():
                         if call.active:
                             # Start agent Deepgram on first audio if not started
                             if not agent_deepgram_started and settings["translation_enabled"]:
+                                call.agent_sample_rate = browser_rate
                                 await call.start_deepgram_agent()
                                 agent_deepgram_started = True
-                                log("🎤 Micrófono agente activo (8kHz)")
+                                log(f"🎤 Micrófono agente activo ({browser_rate}Hz)")
                             
                             await call.send_agent_audio(pcm)
                             
