@@ -207,7 +207,7 @@ class StreamingCall:
             await self._send_initial_silence(self.agent_deepgram_ws)
             
             asyncio.create_task(self._receive_agent_transcripts())
-            log("🎙️ Deepgram agente conectado")
+            log("🎙️ Deepgram agente conectado - listener iniciado")
             
         except Exception as e:
             log(f"❌ Error Deepgram agente: {e}")
