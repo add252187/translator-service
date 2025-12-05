@@ -774,11 +774,6 @@ async def browser_ws(websocket: WebSocket):
                 
                 if data.get("type") == "audio":
                     pcm = base64.b64decode(data["data"])
-                    browser_rate = data.get("sampleRate", 8000)
-                    
-                    # Resample if browser sends different rate
-                    if browser_rate != 8000:
-                        pcm = resample_audio(pcm, browser_rate, 8000)
                     
                     for call in active_calls.values():
                         if call.active:
@@ -786,7 +781,7 @@ async def browser_ws(websocket: WebSocket):
                             if not agent_deepgram_started and settings["translation_enabled"]:
                                 await call.start_deepgram_agent()
                                 agent_deepgram_started = True
-                                log(f"🎤 Micrófono agente activo (browser rate: {browser_rate}Hz)")
+                                log("🎤 Micrófono agente activo (8kHz)")
                             
                             await call.send_agent_audio(pcm)
                             
